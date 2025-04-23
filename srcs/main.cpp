@@ -1,4 +1,4 @@
-// 11127164 - Project 4 - release 1.0.0 - Removed all redundant (comments) codes
+// 11127164 - Project 4 - release 1.0.0.1 - Fixed error object will lost their identifier after been backtracked
 #include <iostream>
 #include <cctype>
 #include <vector>
@@ -3170,7 +3170,18 @@ class Executor {
         );
         break;
       }
-      case containType::Error:
+      case containType::Error: {
+        // (error-object? (car (cons (create-error-object "Error") "text")))
+        node = new node_ext(
+          nodeType::Atom,
+          new token_t{
+            .family = tokenType::String,
+            .text = *cast<string*>(__obj)
+          },
+          nullptr, nullptr, __obj
+        );
+        break;
+      }
       case containType::String: {
         node = new node_t(
           nodeType::Atom,
@@ -3189,7 +3200,7 @@ class Executor {
       case containType::Function: {
         node = new node_ext(
           nodeType::Atom,
-          new token_t {
+          new token_t{
             .family = tokenType::Symbol,
             .text = string("#<procedure ") + __obj->name + ">"
           },
@@ -3230,15 +3241,31 @@ class Executor {
             break;
           }
           case tokenType::String: {
-            retval->type = containType::String;
-            retval->value = new string(root->body->text);
+            if (const node_ext* node = dynamic_cast<const node_ext*>(root)) {
+              retval = node->prototype; // `containType::Error` expected
+            } else {
+              retval->type = containType::String;
+              retval->value = new string(root->body->text);
+            }
             break;
           }
           case tokenType::Quote:
           case tokenType::Symbol: {
-            
-            // (car (cons define define)) -> define (I'm function)
-            // (car '(define . define)) -> define (I'm unprocessed symbol)
+            /**
+             * `purify()`
+             *     v
+             * > (car (cons define define)) -> #<procedure define>
+             *          ^
+             *     `backtrack()`
+             *
+             * `purify()`
+             *     v
+             * > (car '(define . define)) -> define
+             * 
+             * @note
+             * `nodeType::Symbol` node won't be purified,
+             * unless it has been backtracked (owning `node_ext`)
+             */
             if (const node_ext* node = dynamic_cast<const node_ext*>(root)) {
               retval = node->prototype;
             } else {
@@ -3363,13 +3390,6 @@ class Executor {
     
     switch (root->type) {
       case nodeType::Atom: {
-        /**
-         * Only the rest of list items or single element
-         * would be able to enter this part.
-         * @example
-         * 1. (define add +) - only `add` and `+`
-         * 2. owo - `owo` itself
-         */
         switch (root->body->family) {
           case tokenType::Int: {
             retval = make_shared<Container>(stoi(root->body->text));
@@ -3405,7 +3425,6 @@ class Executor {
           }
           default: AssertionError::throws(UNEXPECTED_BEHAVIOR);
         }
-
         break;
       }
       case nodeType::Expr: {
